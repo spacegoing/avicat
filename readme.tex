@@ -1,0 +1,433 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath, amssymb, amsthm, mathtools}
+\usepackage{algorithm, algpseudocode}
+\usepackage{bm}
+
+\DeclareMathOperator*{\argmax}{arg\,max}
+\DeclareMathOperator*{\argmin}{arg\,min}
+\DeclareMathOperator{\softmax}{softmax}
+\DeclareMathOperator{\GRU}{GRU}
+\DeclareMathOperator{\LayerNorm}{LayerNorm}
+\DeclareMathOperator{\MLP}{MLP}
+\DeclareMathOperator{\Emb}{Emb}
+\newcommand{\kl}[2]{D_{\text{KL}}\left(#1 \,\|\, #2\right)}
+
+\title{Mathematical Formulation: Deep State-Space Model Implementation}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{Model Architecture (model.py)}
+
+\subsection{Input/Output Specification}
+\begin{align}
+\text{Input: } &\mathbf{X} \in \mathbb{R}^{B \times T \times D} \quad \text{(batch\_size, seq\_len, obs\_dim)} \\
+\text{Output: } &\mathcal{L}_{\text{ELBO}} \in \mathbb{R}, \quad \hat{\mathbf{C}} \in \{0,\ldots,K-1\}^{B \times T}
+\end{align}
+
+\subsection{Shared State Embeddings}
+\begin{equation}
+\mathbf{E} \in \mathbb{R}^{K \times d_s}, \quad \mathbf{E} \sim \mathcal{N}(0, 0.01\mathbf{I})
+\end{equation}
+where $K = $ \texttt{num\_states}, $d_s = $ \texttt{state\_dim}
+
+\subsection{Neural Transition Model}
+\begin{align}
+p_\theta(c_t | c_{t-1}) &= \text{Categorical}(\bm{\pi}_t^{\text{trans}}) \\
+\bm{\pi}_t^{\text{trans}} &= \softmax(\mathbf{f}_{\text{trans}}(\mathbf{s}_{t-1})) \\
+\mathbf{s}_{t-1} &= \mathbf{c}_{t-1}^\top \mathbf{E} \in \mathbb{R}^{d_s} \\
+\mathbf{f}_{\text{trans}} &: \mathbb{R}^{d_s} \to \mathbb{R}^K
+\end{align}
+
+Network architecture:
+\begin{equation}
+\mathbf{f}_{\text{trans}}(\mathbf{s}) = \mathbf{W}_2 \tanh(\mathbf{W}_1 \mathbf{s} + \mathbf{b}_1) + \mathbf{b}_2
+\end{equation}
+where $\mathbf{W}_1 \in \mathbb{R}^{32 \times d_s}$, $\mathbf{W}_2 \in \mathbb{R}^{K \times 32}$
+
+Initialization: $\mathbf{b}_2 = 0.5 \cdot \mathbf{I}_K \mathbf{1}$ (self-transition bias)
+
+\subsection{Emission Model}
+\begin{align}
+p_\theta(x_t | c_t) &= \mathcal{N}(\bm{\mu}_t, \text{diag}(\bm{\sigma}_t^2)) \\
+\bm{\mu}_t &= \mathbf{f}_{\text{emit}}(\mathbf{c}_t^\top \mathbf{E}) \in \mathbb{R}^D \\
+\bm{\sigma}_t &= \text{clip}(\exp(\log \sigma_0), \sigma_{\min}, \sigma_{\max}) \cdot \mathbf{1}_D
+\end{align}
+
+Network: $\mathbf{f}_{\text{emit}} : \mathbb{R}^{d_s} \to \mathbb{R}^D$ with architecture:
+\begin{equation}
+\mathbf{f}_{\text{emit}}(\mathbf{s}) = \mathbf{W}_2' \tanh(\mathbf{W}_1' \mathbf{s} + \mathbf{b}_1') + \mathbf{b}_2'
+\end{equation}
+
+\subsection{Inference Network (Improved with GRU)}
+
+\subsubsection{Context Extraction}
+\begin{align}
+\mathbf{H} &= \text{BiGRU}(\mathbf{X}) \in \mathbb{R}^{B \times T \times 2h} \\
+\overrightarrow{\mathbf{h}}_t &= \GRU(\mathbf{x}_t, \overrightarrow{\mathbf{h}}_{t-1}) \\
+\overleftarrow{\mathbf{h}}_t &= \GRU(\mathbf{x}_t, \overleftarrow{\mathbf{h}}_{t+1}) \\
+\mathbf{h}_t &= \LayerNorm([\overrightarrow{\mathbf{h}}_t; \overleftarrow{\mathbf{h}}_t])
+\end{align}
+where $h = $ \texttt{rnn\_hidden\_dim} = 32
+
+\subsubsection{Temporal Inference with GRU}
+The posterior distribution is computed using a unidirectional GRU that maintains temporal coherence:
+
+\begin{align}
+q_\phi(c_t | c_{1:t-1}, \mathbf{X}) &= \text{Categorical}(\bm{\pi}_t^q) \\
+\mathbf{z}_t^{\text{inf}} &= [\mathbf{h}_t; \mathbf{c}_{t-1}^{\text{soft}\top} \mathbf{E}] \in \mathbb{R}^{2h + d_s} \\
+\mathbf{o}_t, \mathbf{s}_t^{\text{inf}} &= \text{GRU}_{\text{inf}}(\mathbf{z}_t^{\text{inf}}, \mathbf{s}_{t-1}^{\text{inf}}) \\
+\bm{\pi}_t^q &= \softmax(\mathbf{f}_{\text{proj}}(\mathbf{o}_t))
+\end{align}
+
+where:
+\begin{itemize}
+\item $\mathbf{s}_t^{\text{inf}} \in \mathbb{R}^h$ is the inference GRU hidden state
+\item $\mathbf{o}_t \in \mathbb{R}^h$ is the GRU output at time $t$
+\item $\text{GRU}_{\text{inf}} : \mathbb{R}^{2h + d_s} \times \mathbb{R}^h \to \mathbb{R}^h \times \mathbb{R}^h$
+\item $\mathbf{f}_{\text{proj}} : \mathbb{R}^h \to \mathbb{R}^K$ is the output projection
+\end{itemize}
+
+\subsubsection{Output Projection Network}
+\begin{align}
+\mathbf{f}_{\text{proj}}(\mathbf{o}) = \mathbf{W}_2^{\text{proj}} \tanh(\mathbf{W}_1^{\text{proj}} \mathbf{o} + \mathbf{b}_1^{\text{proj}}) + \mathbf{b}_2^{\text{proj}}
+\end{align}
+where $\mathbf{W}_1^{\text{proj}} \in \mathbb{R}^{32 \times h}$, $\mathbf{W}_2^{\text{proj}} \in \mathbb{R}^{K \times 32}$
+
+\subsubsection{Initialization}
+\begin{align}
+\mathbf{c}_0^{\text{soft}} &= \frac{1}{K}\mathbf{1}_K \quad \text{(uniform prior)} \\
+\mathbf{s}_0^{\text{inf}} &= \mathbf{0} \in \mathbb{R}^h \quad \text{(zero hidden state)}
+\end{align}
+
+\subsection{Gumbel-Softmax Sampling}
+The sampling remains unchanged:
+\begin{align}
+\mathbf{c}_t^{\text{soft}} &= \softmax\left(\frac{\mathbf{l}_t^q + \mathbf{g}_t}{\tau}\right) \\
+\mathbf{g}_t &= -\log(-\log(\mathbf{U} + \epsilon) + \epsilon), \quad \mathbf{U} \sim \text{Uniform}(0,1)^K
+\end{align}
+where $\mathbf{l}_t^q = \mathbf{f}_{\text{proj}}(\mathbf{o}_t)$ are the logits, $\tau$ = temperature, $\epsilon = 10^{-10}$
+
+\subsubsection{Key Improvement}
+The inference GRU maintains a hidden state $\mathbf{s}_t^{\text{inf}}$ across timesteps, enabling:
+\begin{equation}
+q_\phi(c_t | c_{1:t-1}, \mathbf{X}) \neq q_\phi(c_t | c_{t-1}, \mathbf{X})
+\end{equation}
+This captures the full history of previous state assignments, not just the immediate previous state, leading to more temporally coherent posterior distributions.
+
+
+\subsection{ELBO Computation}
+
+\subsubsection{Per-timestep Operations}
+For each $t \in \{1, \ldots, T\}$:
+
+1. \textbf{Posterior logits:}
+\begin{equation}
+\mathbf{l}_t^q = \begin{cases}
+\mathbf{f}_{\text{inf}}([\frac{1}{K}\mathbf{1}_K^\top \mathbf{E}; \mathbf{h}_t]) & t = 1 \\
+\mathbf{f}_{\text{inf}}([\mathbf{c}_{t-1}^{\text{soft}\top} \mathbf{E}; \mathbf{h}_t]) & t > 1
+\end{cases}
+\end{equation}
+
+2. \textbf{Clipped probabilities:}
+\begin{align}
+\tilde{\mathbf{l}}_t^q &= \text{clip}(\mathbf{l}_t^q, -10, 10) \\
+\bm{\pi}_t^q &= \softmax(\tilde{\mathbf{l}}_t^q) + 10^{-10} \\
+\bm{\pi}_t^q &\leftarrow \bm{\pi}_t^q / \|\bm{\pi}_t^q\|_1
+\end{align}
+
+3. \textbf{Prior probabilities:}
+\begin{equation}
+\bm{\pi}_t^p = \begin{cases}
+\frac{1}{K}\mathbf{1}_K & t = 1 \\
+\softmax(\text{clip}(\mathbf{f}_{\text{trans}}(\mathbf{c}_{t-1}^{\text{soft}\top} \mathbf{E}), -10, 10)) + 10^{-10} & t > 1
+\end{cases}
+\end{equation}
+
+4. \textbf{KL divergence (analytical):}
+\begin{equation}
+\mathcal{L}_{\text{KL}}^{(t)} = w_{\text{KL}} \cdot \mathbb{E}_{\mathbf{X}}\left[\sum_{k=1}^K \pi_{t,k}^q \log\frac{\pi_{t,k}^q}{\pi_{t,k}^p}\right]
+\end{equation}
+
+5. \textbf{State sampling:}
+\begin{equation}
+\mathbf{c}_t^{\text{soft}} = \text{GumbelSoftmax}(\tilde{\mathbf{l}}_t^q, \tau)
+\end{equation}
+
+6. \textbf{Reconstruction likelihood:}
+\begin{align}
+\bm{\mu}_t, \bm{\sigma}_t &= \text{EmissionModel}(\mathbf{c}_t^{\text{soft}}) \\
+\mathcal{L}_{\text{recon}}^{(t)} &= -\frac{1}{2}\mathbb{E}_{\mathbf{X}}\left[\sum_{d=1}^D \left(\frac{(x_{t,d} - \mu_{t,d})^2}{\sigma_{t,d}^2 + \epsilon} + \log(2\pi(\sigma_{t,d}^2 + \epsilon))\right)\right]
+\end{align}
+
+\subsubsection{Total ELBO}
+\begin{equation}
+\mathcal{L}_{\text{ELBO}} = \frac{1}{T}\sum_{t=1}^T \left(\mathcal{L}_{\text{recon}}^{(t)} - \mathcal{L}_{\text{KL}}^{(t)}\right)
+\end{equation}
+
+\subsection{State Prediction}
+\begin{equation}
+\hat{c}_t = \argmax_{k} \pi_{t,k}^q
+\end{equation}
+
+\section{Training Methodology (trainer.py)}
+
+\subsection{Loss Function}
+\begin{equation}
+\mathcal{L}_{\text{train}} = -\mathcal{L}_{\text{ELBO}}
+\end{equation}
+
+\subsection{Optimization}
+\begin{align}
+\theta_{t+1} &= \theta_t - \alpha \cdot \text{clip}(\nabla_\theta \mathcal{L}_{\text{train}}, \|\cdot\|_2 \leq \gamma) \\
+\text{Optimizer: } &\text{AdamW}(\alpha = 10^{-3}, \beta_1 = 0.9, \beta_2 = 0.999, \lambda = 10^{-5})
+\end{align}
+where $\gamma = 0.5$ (gradient clipping threshold)
+
+\subsection{Annealing Schedules}
+
+\subsubsection{Temperature Annealing}
+\begin{align}
+\tau^{(n+1)} &= \max(\tau_{\min}, \tau^{(n)} \cdot r_\tau) \\
+\tau^{(0)} &= 10.0, \quad \tau_{\min} = 0.5, \quad r_\tau = 0.9995
+\end{align}
+
+\subsubsection{KL Weight Annealing}
+\begin{align}
+w_{\text{KL}}^{(n+1)} &= \min(w_{\text{KL}}^{\max}, w_{\text{KL}}^{(n)} \cdot r_w) \\
+w_{\text{KL}}^{(0)} &= 0.0001, \quad w_{\text{KL}}^{\max} = 0.1, \quad r_w = 1.002
+\end{align}
+
+\subsection{Learning Rate Scheduling}
+\begin{equation}
+\alpha^{(e+1)} = \begin{cases}
+\alpha^{(e)} \cdot \rho & \text{if } \text{val\_acc}^{(e)} \leq \max_{i<e}\text{val\_acc}^{(i)} \text{ for } p \text{ epochs} \\
+\alpha^{(e)} & \text{otherwise}
+\end{cases}
+\end{equation}
+where $\rho = 0.7$ (factor), $p = 20$ (patience), $\alpha_{\min} = 10^{-5}$
+
+\subsection{Clustering Accuracy (Hungarian Algorithm)}
+
+\subsubsection{Confusion Matrix}
+\begin{equation}
+\mathbf{M}_{ij} = \sum_{b=1}^B \sum_{t=1}^T \mathbb{1}[\hat{c}_{b,t} = i] \cdot \mathbb{1}[c_{b,t}^{\text{true}} = j]
+\end{equation}
+
+\subsubsection{Optimal Assignment}
+\begin{equation}
+\phi^* = \argmax_{\phi \in S_K} \sum_{i=1}^K \mathbf{M}_{i,\phi(i)}
+\end{equation}
+where $S_K$ is the set of all permutations
+
+\subsubsection{Accuracy}
+\begin{equation}
+\text{ACC} = \frac{1}{BT} \sum_{i=1}^K \mathbf{M}_{i,\phi^*(i)}
+\end{equation}
+
+\subsection{Training Hyperparameters}
+
+\begin{align}
+\text{Batch size: } B &= 64 \\
+\text{Epochs: } N_{\text{epoch}} &= 300 \\
+\text{Validation interval: } &\text{every 5 epochs} \\
+\text{Checkpoint: } &\text{save when ACC}_{\text{val}}^{(e)} > \max_{i<e} \text{ACC}_{\text{val}}^{(i)}
+\end{align}
+
+\subsection{Convergence Strategy}
+
+The training employs a three-phase strategy:
+
+\textbf{Phase 1 (Exploration):} $\tau \approx 10$, $w_{\text{KL}} \approx 0.0001$
+\begin{equation}
+\mathcal{L} \approx \mathcal{L}_{\text{recon}} \quad \text{(focus on reconstruction)}
+\end{equation}
+
+\textbf{Phase 2 (Refinement):} $\tau \in [2, 10]$, $w_{\text{KL}} \in [0.001, 0.01]$
+\begin{equation}
+\mathcal{L} = \mathcal{L}_{\text{recon}} - \lambda \cdot \mathcal{L}_{\text{KL}}, \quad \lambda \ll 1
+\end{equation}
+
+\textbf{Phase 3 (Convergence):} $\tau \to 0.5$, $w_{\text{KL}} \to 0.1$
+\begin{equation}
+\mathcal{L} = \mathcal{L}_{\text{recon}} - 0.1 \cdot \mathcal{L}_{\text{KL}} \quad \text{(balanced objective)}
+\end{equation}
+
+
+
+\subsection{Optimization Techniques}
+
+\subsubsection{Temperature Annealing}
+
+\textbf{Definition:}
+Let $\tau: \mathbb{N} \to \mathbb{R}^+$ be the temperature schedule function where:
+\begin{align}
+\tau(n) = \begin{cases}
+\tau_0 & n = 0 \\
+\max(\tau_{\min}, r_\tau \cdot \tau(n-1)) & n > 0
+\end{cases}
+\end{align}
+This defines a geometric decay with lower bound: $\tau(n) = \max(\tau_{\min}, \tau_0 \cdot r_\tau^n)$
+
+\textbf{Mechanism:}
+The Gumbel-Softmax distribution converges to categorical as $\tau \to 0$:
+\begin{align}
+\lim_{\tau \to 0} \softmax\left(\frac{\log \bm{\pi} + \mathbf{g}}{\tau}\right) &= \text{one-hot}(\argmax_k(\log \pi_k + g_k)) \\
+\lim_{\tau \to \infty} \softmax\left(\frac{\log \bm{\pi} + \mathbf{g}}{\tau}\right) &\approx \text{Uniform}(K)
+\end{align}
+
+High $\tau$ enables gradient flow through all states (exploration), while low $\tau$ produces near-discrete samples (exploitation). The schedule ensures:
+- Early training ($n \ll 1000$): $\tau \approx 10$, samples are smooth, all states receive gradients
+- Mid training ($n \approx 5000$): $\tau \approx 3$, samples become peaked but maintain differentiability  
+- Late training ($n > 10000$): $\tau \to 0.5$, nearly discrete state assignments
+
+\subsubsection{KL Weight Annealing}
+
+\textbf{Definition:}
+The KL weight schedule $w_{\text{KL}}: \mathbb{N} \to [0, w_{\max}]$ follows:
+\begin{align}
+w_{\text{KL}}(n) = \begin{cases}
+w_0 & n = 0 \\
+\min(w_{\max}, r_w \cdot w_{\text{KL}}(n-1)) & n > 0
+\end{cases}
+\end{align}
+This yields exponential growth with saturation: $w_{\text{KL}}(n) = \min(w_{\max}, w_0 \cdot r_w^n)$
+
+\textbf{Mechanism:}
+The effective loss becomes:
+\begin{equation}
+\mathcal{L}_{\text{eff}}(n) = \mathcal{L}_{\text{recon}} - w_{\text{KL}}(n) \cdot \kl{q_\phi(C|X)}{p_\theta(C)}
+\end{equation}
+
+The annealing prevents posterior collapse by:
+- Initially ($w_{\text{KL}} \approx 0$): $\nabla_\phi \mathcal{L} \approx \nabla_\phi \mathcal{L}_{\text{recon}}$, allowing $q_\phi$ to find informative states
+- Gradually increasing regularization: Forces $q_\phi$ to match $p_\theta$ only after discovering meaningful structure
+- Convergence ($w_{\text{KL}} = 0.1$): Balances reconstruction and prior matching
+
+\subsubsection{Learning Rate Scheduling}
+
+\textbf{Definition:}
+Define patience counter $s: \mathbb{N} \to \mathbb{N}$ and best accuracy tracker $a^*: \mathbb{N} \to [0,1]$:
+\begin{align}
+s(e) &= \begin{cases}
+0 & \text{if } a_{\text{val}}(e) > a^*(e-1) \\
+s(e-1) + 1 & \text{otherwise}
+\end{cases} \\
+\alpha(e) &= \begin{cases}
+\alpha(e-1) \cdot \rho & \text{if } s(e) \geq p \\
+\alpha(e-1) & \text{otherwise}
+\end{cases}
+\end{align}
+
+\textbf{Mechanism:}
+ReduceLROnPlateau adapts step size based on validation progress:
+- Maintains learning rate while model improves: $\|\theta_{t+1} - \theta_t\| \propto \alpha$
+- Reduces upon plateau detection: Enables finer optimization in loss landscape valleys
+- Prevents overshooting: Smaller steps near convergence improve final accuracy
+
+\subsubsection{Hungarian Algorithm for Accuracy}
+
+\textbf{Definition:}
+Given predicted labels $\hat{\mathbf{C}} \in \{0,\ldots,K-1\}^{B \times T}$ and true labels $\mathbf{C}^{\text{true}}$, construct cost matrix:
+\begin{equation}
+\mathbf{M} \in \mathbb{N}^{K \times K}, \quad \mathbf{M}_{ij} = |\{(b,t) : \hat{c}_{b,t} = i \land c_{b,t}^{\text{true}} = j\}|
+\end{equation}
+
+The optimal permutation solves:
+\begin{equation}
+\phi^* = \argmax_{\phi \in S_K} \text{tr}(\mathbf{P}_\phi^\top \mathbf{M}) = \argmax_{\phi \in S_K} \sum_{i=1}^K \mathbf{M}_{i,\phi(i)}
+\end{equation}
+where $\mathbf{P}_\phi$ is the permutation matrix for $\phi$.
+
+\textbf{Mechanism:}
+The Hungarian algorithm solves this assignment problem in $O(K^3)$ time by:
+1. Converting to minimum cost: $\mathbf{C} = \max(\mathbf{M}) - \mathbf{M}$
+2. Row/column reduction to create zeros
+3. Finding minimum vertex cover via augmenting paths
+4. Extracting optimal assignment from zero entries
+
+This handles label permutation invariance inherent in unsupervised clustering.
+
+\subsection{Three-Phase Training Strategy}
+
+\subsubsection{Phase 1: Exploration (Epochs 1-100)}
+
+\textbf{Motivation:}
+Discover informative latent structure without prior constraints. The model must learn which observations belong together before learning transition dynamics.
+
+\textbf{Mathematical Characterization:}
+\begin{align}
+\tau &\in [7, 10] \quad \text{(high temperature)} \\
+w_{\text{KL}} &\in [10^{-4}, 10^{-3}] \quad \text{(negligible KL)} \\
+\mathcal{L}_{\text{eff}} &\approx \mathbb{E}_{q_\phi}\left[\sum_t \log p_\theta(x_t|c_t)\right]
+\end{align}
+
+The gradient w.r.t. inference network:
+\begin{equation}
+\nabla_\phi \mathcal{L} \approx \mathbb{E}_{\mathbf{c} \sim \text{GumbelSoftmax}(q_\phi, \tau)}\left[\sum_t \nabla_\phi \log p_\theta(x_t|c_t)\right]
+\end{equation}
+
+\textbf{Achievement Mechanism:}
+- High $\tau$ ensures smooth state distributions: $\mathbf{c}_t^{\text{soft}} \approx [0.15, 0.25, 0.20, 0.22, 0.18]$
+- All states receive gradient signals through soft assignments
+- Inference network learns observation-to-state mapping via reconstruction signal alone
+- Prevents early commitment to suboptimal clustering
+
+\subsubsection{Phase 2: Refinement (Epochs 100-200)}
+
+\textbf{Motivation:}
+Gradually introduce temporal consistency while sharpening state assignments. Balance between maintaining discovered structure and learning dynamics.
+
+\textbf{Mathematical Characterization:}
+\begin{align}
+\tau &\in [2, 7] \quad \text{(decreasing temperature)} \\
+w_{\text{KL}} &\in [10^{-3}, 10^{-2}] \quad \text{(increasing regularization)} \\
+\mathcal{L}_{\text{eff}} &= \mathcal{L}_{\text{recon}} - \lambda(n) \cdot \kl{q_\phi}{p_\theta}, \quad \lambda(n) \in [0.001, 0.01]
+\end{align}
+
+The posterior begins to respect the prior:
+\begin{equation}
+q_\phi(c_t|c_{t-1}, X) \approx (1-\epsilon) \cdot q_{\text{free}}(c_t|X) + \epsilon \cdot p_\theta(c_t|c_{t-1})
+\end{equation}
+where $\epsilon \propto w_{\text{KL}}(n)$ controls prior influence.
+
+\textbf{Achievement Mechanism:}
+- Decreasing $\tau$ sharpens distributions: $\mathbf{c}_t^{\text{soft}} \to [0.05, 0.85, 0.05, 0.03, 0.02]$
+- Increasing $w_{\text{KL}}$ encourages temporal smoothness via transition model
+- Transition model $p_\theta$ learns from increasingly discrete state sequences
+- Model discovers balance between observation fit and temporal coherence
+
+\subsubsection{Phase 3: Convergence (Epochs 200-300)}
+
+\textbf{Motivation:}
+Fine-tune with near-discrete states and full regularization. Achieve final alignment between inference and generative models.
+
+\textbf{Mathematical Characterization:}
+\begin{align}
+\tau &\to 0.5 \quad \text{(near-discrete)} \\
+w_{\text{KL}} &\to 0.1 \quad \text{(full regularization)} \\
+\mathcal{L}_{\text{eff}} &= \mathcal{L}_{\text{recon}} - 0.1 \cdot \kl{q_\phi}{p_\theta}
+\end{align}
+
+The posterior and prior reach equilibrium:
+\begin{equation}
+q_\phi^*(c_t|c_{t-1}, X) \approx p_\theta^*(c_t|c_{t-1}) \cdot \frac{p_\theta^*(x_t|c_t)}{\int p_\theta^*(x_t|c') p_\theta^*(c'|c_{t-1}) dc'}
+\end{equation}
+
+\textbf{Achievement Mechanism:}
+- Near-discrete samples: $\mathbf{c}_t^{\text{soft}} \approx [0, 1, 0, 0, 0]$ (one-hot)
+- Full KL penalty ensures learned dynamics match true transitions
+- Learning rate reduction (via scheduler) enables precise convergence
+- Model achieves interpretable discrete states with accurate dynamics
+
+\textbf{Convergence Guarantee:}
+Under these schedules, the model converges to a local optimum where:
+\begin{align}
+\nabla_{\theta,\phi} \mathcal{L}_{\text{ELBO}} &\approx 0 \\
+q_\phi(C|X) &\approx p_\theta(C|X) \quad \text{(posterior consistency)} \\
+\hat{c}_t &= \argmax_k q_\phi(c_t = k|X) \quad \text{(discrete states)}
+\end{align}
+
+\end{document}

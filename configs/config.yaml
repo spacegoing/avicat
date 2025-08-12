@@ -1,0 +1,61 @@
+# Model configuration
+model:
+  num_states: 5
+  state_dim: 16
+  obs_dim: 20
+  transition:
+    hidden_dims: [32]
+    activation: tanh
+    dropout: 0.0
+  emission:
+    hidden_dims: [32]
+    activation: tanh
+    dropout: 0.0
+    std_init: 0.5
+    std_min: 0.1
+    std_max: 2.0
+  inference:
+    rnn_hidden_dim: 32
+    rnn_num_layers: 1
+    hidden_dims: [32]
+    dropout: 0.0
+  gumbel:
+    temperature_init: 10.0
+    temperature_min: 0.5
+    temperature_anneal_rate: 0.9995
+  regularization:
+    kl_weight_init: 0.0001
+    kl_weight_max: 0.1
+    kl_anneal_rate: 1.002
+
+# Data configuration
+data:
+  num_sequences_train: 1000
+  num_sequences_val: 200
+  seq_length: 50
+  num_true_states: 5
+  obs_dim: 20
+  transition_prob_concentration: 50.0
+  transition_noise: 0.05
+  emission_noise_std: 0.1
+  state_separation: 5.0
+  seed: 42
+  num_workers: 0
+
+# Training configuration
+training:
+  batch_size: 64
+  learning_rate: 0.001
+  num_epochs: 300
+  grad_clip: 0.5
+  device: mps
+  scheduler:
+    enabled: true
+    patience: 20
+    factor: 0.7
+    min_lr: 0.00001
+  logging:
+    val_interval: 5
+    use_wandb: true
+    project_name: dssm-categorical
+    run_name: null
