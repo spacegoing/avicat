@@ -1,0 +1,107 @@
+# Model configuration for Crypto Market Regime Discovery
+model:
+  num_states: 5  # Number of market regimes to discover (e.g., bull, bear, sideways, volatile, calm)
+  state_dim: 32  # Increased for richer state representation
+  obs_dim: 35  # Will be overridden by actual feature count
+  transition:
+    hidden_dims: [64, 32]  # Deeper network for complex market dynamics
+    activation: tanh
+    dropout: 0.1  # Add slight dropout for regularization
+  emission:
+    hidden_dims: [64, 32]
+    activation: tanh
+    dropout: 0.1
+    std_init: 0.3  # Lower initial std for financial data
+    std_min: 0.05  # Tighter bounds for normalized features
+    std_max: 1.0
+  inference:
+    rnn_hidden_dim: 64  # Larger hidden dim for complex patterns
+    rnn_num_layers: 2  # Deeper RNN for better temporal modeling
+    hidden_dims: [64]
+    dropout: 0.1
+  gumbel:
+    temperature_init: 5.0  # Start with moderate temperature
+    temperature_min: 0.3  # Lower min for sharper distinctions
+    temperature_anneal_rate: 0.9997  # Slower annealing for complex data
+  regularization:
+    kl_weight_init: 0.00001  # Very low initial KL for exploration
+    kl_weight_max: 0.05  # Lower max KL for financial data
+    kl_anneal_rate: 1.0005  # Slower KL annealing
+
+# Data configuration
+data:
+  # Paths
+  raw_data_dir: market_data
+  processed_data_dir: processed_data
+  
+  # Preprocessing parameters
+  sequence_length: 168  # 7 days of hourly data
+  stride: 24  # Step by 1 day for overlapping sequences
+  train_ratio: 0.7
+  val_ratio: 0.15
+  
+  # Dataset parameters
+  num_workers: 4
+  augment_train: true
+  noise_level: 0.01
+  
+  # Feature engineering
+  use_price_features: true
+  use_technical_features: true
+  use_sentiment_features: true
+  use_microstructure_features: true
+  
+  # Synthetic data params (kept for compatibility)
+  num_sequences_train: 1000
+  num_sequences_val: 200
+  seq_length: 168
+  num_true_states: 5
+  obs_dim: 35
+  transition_prob_concentration: 50.0
+  transition_noise: 0.05
+  emission_noise_std: 0.1
+  state_separation: 5.0
+  seed: 42
+
+# Training configuration
+training:
+  batch_size: 32  # Smaller batch for longer sequences
+  learning_rate: 0.0005  # Lower LR for financial data
+  num_epochs: 500  # More epochs for complex patterns
+  grad_clip: 1.0  # Standard clipping
+  device: cuda  # Use GPU if available
+  
+  # Early stopping
+  early_stopping:
+    enabled: true
+    patience: 50
+    min_delta: 0.0001
+    
+  scheduler:
+    enabled: true
+    patience: 30
+    factor: 0.5
+    min_lr: 0.00001
+    
+  logging:
+    val_interval: 10
+    save_interval: 50
+    use_wandb: true
+    project_name: crypto-dssm-regimes
+    run_name: null
+    log_gradients: false
+    log_weights: false
+    
+  # Checkpointing
+  checkpoint:
+    save_top_k: 3
+    monitor: val_accuracy
+    mode: max
+    
+# Analysis configuration
+analysis:
+  compute_regime_statistics: true
+  plot_state_transitions: true
+  analyze_feature_importance: true
+  export_predictions: true
+  results_dir: analysis_results
