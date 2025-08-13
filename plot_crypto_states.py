@@ -237,17 +237,17 @@ class CryptoStatePlotter:
             fig.update_traces(xaxis="x", yaxis="y", row=1, col=1)
             fig.update_traces(xaxis="x2", yaxis="y2", row=2, col=1)
 
-            # Save as static image with explicit backend
-            fig.write_image(
-                str(save_path),
-                width=1400,
-                height=800,
-                engine="kaleido",
-                format="png",
-                scale=2,  # Higher resolution
-            )
+            # # Save as static image with explicit backend
+            # fig.write_image(
+            #     str(save_path),
+            #     width=1400,
+            #     height=800,
+            #     engine="kaleido",
+            #     format="png",
+            #     scale=2,  # Higher resolution
+            # )
 
-            # Also save as interactive HTML
+            # # Also save as interactive HTML
             fig.write_html(str(save_path).replace(".png", ".html"))
             print(f"Saved plot to {save_path}")
 
@@ -462,12 +462,12 @@ class CryptoStatePlotter:
         self.add_state_legend(fig, unique_states)
 
         if save_path:
-            fig.write_image(
-                str(save_path),
-                width=1400,
-                height=900,
-                engine="kaleido",
-            )
+            # fig.write_image(
+            #     str(save_path),
+            #     width=1400,
+            #     height=900,
+            #     engine="kaleido",
+            # )
             fig.write_html(str(save_path).replace(".png", ".html"))
             print(f"Saved summary plot to {save_path}")
 
