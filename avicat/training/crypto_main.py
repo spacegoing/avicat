@@ -9,19 +9,20 @@ from omegaconf import DictConfig, OmegaConf
 
 warnings.filterwarnings("ignore")
 
-from crypto_trainer import CryptoTrainer
-
-from crypto_dataset import (
+from avicat.data.crypto_dataset import (
     MarketRegimeAnalyzer,
     create_crypto_dataloaders,
 )
-from datapipe import create_dataloaders as create_synthetic_dataloaders
-from model import DeepStateSpaceModel
+from avicat.data.synth_dataset import (
+    create_dataloaders as create_synthetic_dataloaders,
+)
+from avicat.models.model import DeepStateSpaceModel
+from avicat.training.crypto_trainer import CryptoTrainer
 
 
 @hydra.main(
     version_base=None,
-    config_path="configs",
+    config_path="../../configs",
     config_name="crypto_config",
 )
 def main(cfg: DictConfig):
