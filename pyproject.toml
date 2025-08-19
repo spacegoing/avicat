@@ -1,3 +1,35 @@
+# This tells pip how to build your project. Setuptools is the standard backend.
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+# This contains all your project's metadata.
+[project]
+name = "avicat"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "torch",
+    "numpy",
+    "pandas",
+    "hydra-core",
+    "omegaconf",
+    "wandb",
+    "matplotlib",
+    "seaborn",
+    "plotly",
+    "scipy",
+    "tqdm",
+    # Add any other libraries you use here
+]
+
+# This is where you define your custom commands.
+[project.scripts]
+avitrain = "avicat.training.main:main"
+aviinfer = "avicat.inference.infer:main"
+avianalyze = "avicat.analysis.checkpoint_analyzer:main"
+
+# Your ruff configuration remains unchanged below.
 [tool.ruff]
 line-length = 79
 indent-width = 4
@@ -7,9 +39,8 @@ preview = false
 fix = true
 
 [tool.ruff.lint]
-extend-select = ["I", "COM812"]  # Move COM812 here
+extend-select = ["I", "COM812"]
 extend-ignore = ["C90", "D", "E111"]
-# Remove the duplicate select line
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["CPY001"]
