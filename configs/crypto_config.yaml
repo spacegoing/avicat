@@ -70,7 +70,7 @@ data:
 training:
   batch_size: 32  # Smaller batch for longer sequences
   learning_rate: 0.0005  # Lower LR for financial data
-  num_epochs: 500  # More epochs for complex patterns
+  num_epochs: 1000  # More epochs for complex patterns
   grad_clip: 1.0  # Standard clipping
   device: cuda  # Use GPU if available
   
@@ -97,7 +97,7 @@ training:
     
   # Checkpointing
   checkpoint:
-    save_top_k: 3
+    save_top_k: 10
     monitor: val_accuracy
     mode: max
     

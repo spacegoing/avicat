@@ -124,11 +124,11 @@ class InferenceNetwork(nn.Module):
             self.cfg.inference.rnn_hidden_dim,
             self.cfg.inference.rnn_num_layers,
             batch_first=True,
-            bidirectional=True,
+            bidirectional=False,
             dropout=0,
         )
 
-        self.context_norm = nn.LayerNorm(2 * self.cfg.inference.rnn_hidden_dim)
+        self.context_norm = nn.LayerNorm(self.cfg.inference.rnn_hidden_dim)
 
         # State embeddings
         self.state_embeddings = nn.Embedding(
@@ -140,7 +140,7 @@ class InferenceNetwork(nn.Module):
         # NEW: GRU for inference (unidirectional)
         # Input: concatenation of context and previous state embedding
         inference_input_dim = (
-            2 * self.cfg.inference.rnn_hidden_dim + self.cfg.state_dim
+            self.cfg.inference.rnn_hidden_dim + self.cfg.state_dim
         )
         self.inference_gru = nn.GRU(
             inference_input_dim,
