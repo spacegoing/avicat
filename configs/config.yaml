@@ -35,10 +35,13 @@ data:
   seq_length: 50
   num_true_states: 5
   obs_dim: 20
-  transition_prob_concentration: 50.0
-  transition_noise: 0.05
-  emission_noise_std: 0.1
-  state_separation: 5.0
+
+  transition_bias: 0.55  # Very low - states change frequently (almost random walk)
+  emission_overlap: 0.9  # Extreme overlap - states almost indistinguishable
+  emission_noise_scale: 3.0  # Very high noise - SNR is terrible
+  state_persistence_prob: 0.35  # 35% random jumps - breaks Markov assumption badly
+  rare_state_prob: 0.05  # Some states appear only 5% as often as others
+
   seed: 42
   num_workers: 0
 
@@ -48,7 +51,7 @@ training:
   learning_rate: 0.001
   num_epochs: 300
   grad_clip: 0.5
-  device: mps
+  device: cpu
   scheduler:
     enabled: true
     patience: 20
