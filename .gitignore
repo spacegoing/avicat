@@ -1,3 +1,7 @@
+analysis_results
+checkpoints
+
+saved*
 output*
 wandb*
 ckpts

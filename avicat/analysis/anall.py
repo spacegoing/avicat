@@ -1,4 +1,3 @@
-import argparse
 import json
 from pathlib import Path
 
@@ -8,13 +7,15 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import torch
-from omegaconf import DictConfig
 
 # Use a non-interactive backend for plotting
 matplotlib.use("Agg")
 
-from crypto_dataset import MarketRegimeAnalyzer, create_crypto_dataloaders
-from model import DeepStateSpaceModel
+from avicat.data.crypto_dataset import (
+    MarketRegimeAnalyzer,
+    create_crypto_dataloaders,
+)
+from avicat.models.model import DeepStateSpaceModel
 
 
 def load_model_from_checkpoint(ckpt_path: str, device: torch.device):

@@ -8,9 +8,9 @@ from typing import Dict, Optional, Tuple
 import numpy as np
 import pandas as pd
 import torch
-from plot_crypto_states import CryptoStatePlotter
+# from plot_crypto_states import CryptoStatePlotter
 
-from model import DeepStateSpaceModel
+from avicat.models.model import DeepStateSpaceModel
 
 
 class CryptoStateInference:
@@ -130,7 +130,7 @@ class CryptoStateInference:
             seq_timestamps = pd.date_range(
                 end=end_time,
                 periods=self.seq_length,
-                freq="H",
+                freq="h",
             )
             for t, state in zip(seq_timestamps, seq_states):
                 if t not in hour_states:
@@ -171,31 +171,31 @@ class CryptoStateInference:
         full_df.to_csv(csv_path, index=False)
         print(f"\nSaved full dataset with states to: {csv_path}")
 
-        plotter = CryptoStatePlotter(output_dir=str(output_dir))
-        summary_path = output_dir / "btc_states_summary.html"
-        plotter.create_summary_plot(full_df, summary_path)
+        # plotter = CryptoStatePlotter(output_dir=str(output_dir))
+        # summary_path = output_dir / "btc_states_summary.html"
+        # plotter.create_summary_plot(full_df, summary_path)
 
-        # This part remains the same as it calls the modified plotter
-        full_df["year"] = full_df["timestamp"].dt.year
-        full_df["month"] = full_df["timestamp"].dt.month
-        args_list = [
-            (df_month.copy(), year, month, "btc_states", output_dir)
-            for (year, month), df_month in full_df.groupby(["year", "month"])
-        ]
+        # # This part remains the same as it calls the modified plotter
+        # full_df["year"] = full_df["timestamp"].dt.year
+        # full_df["month"] = full_df["timestamp"].dt.month
+        # args_list = [
+        #     (df_month.copy(), year, month, "btc_states", output_dir)
+        #     for (year, month), df_month in full_df.groupby(["year", "month"])
+        # ]
 
-        ctx = mp.get_context("spawn")
-        with ctx.Pool(n_workers or cpu_count()) as pool:
-            pool.map(self.process_month_for_plotter, args_list)
+        # ctx = mp.get_context("spawn")
+        # with ctx.Pool(n_workers or cpu_count()) as pool:
+        #     pool.map(self.process_month_for_plotter, args_list)
 
         print("\n" + "=" * 60)
         print(f"Pipeline Complete for {self.checkpoint_path.name}!")
         print("=" * 60)
 
-    def process_month_for_plotter(self, args):
-        df_month, year, month, output_prefix, output_dir = args
-        plotter = CryptoStatePlotter(output_dir=str(output_dir))
-        save_path = output_dir / f"{output_prefix}_{year:04d}_{month:02d}.html"
-        plotter.plot_month(df_month, year, month, save_path)
+    # def process_month_for_plotter(self, args):
+    #     df_month, year, month, output_prefix, output_dir = args
+    #     plotter = CryptoStatePlotter(output_dir=str(output_dir))
+    #     save_path = output_dir / f"{output_prefix}_{year:04d}_{month:02d}.html"
+    #     plotter.plot_month(df_month, year, month, save_path)
 
 
 def main():
@@ -222,7 +222,7 @@ def main():
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=32,
+        default=512,
         help="Batch size for inference",
     )
     parser.add_argument(
